@@ -1,11 +1,11 @@
-import asyncio
+import asyncio, aiofiles
 from datetime import datetime, timedelta
 import google.generativeai as genai
+from anthropic import AsyncAnthropic
 import re, os, json
-import aiofiles
 import google
 from km_utils import dir_to_json_with_txt_content, save_description_to_file, create_nested_json, read_text_file_if_exists, create_folder_structure
-
+from llm_api_calls import send_message_to_gemini_async
 
 
 class RateLimiter:
@@ -28,61 +28,12 @@ class RateLimiter:
         self.calls.append(datetime.now())
 
 
-async def send_message_to_gemini_async(user_input, rate_limiter=None, attempt=1, max_attempts=10, retry_delay = 1):
-    if rate_limiter is not None: await rate_limiter.wait()
-
-    genai.configure(api_key="AIzaSyCEN_JaFKJ9E76p4bSkLz5xJEVdN4eYQLw")
-    # genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-    generation_config = {
-        "temperature": 0,
-        "top_p": 1,
-        "top_k": 1,
-        # "max_output_tokens": 2048,
-    }
-
-    safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "block_none"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "block_none"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "block_none"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "block_none"},
-    ]
-
-    gemini = genai.GenerativeModel(
-        model_name="gemini-1.0-pro",  # Или другую модель, например, "models/gemini-1.5-pro"
-        generation_config=generation_config,
-        safety_settings=safety_settings)
-
-
-    try:
-        response = await gemini.generate_content_async(
-            contents=user_input,
-            generation_config=generation_config,
-            stream=False,
-        )
-        if response.candidates[0].finish_reason == 1: 
-            gemini_response_text = response.candidates[0].content.parts[0].text
-            return {"text_response": gemini_response_text, 
-                    "input_tokens": gemini.count_tokens(user_input), 
-                    "output_tokens": gemini.count_tokens(gemini_response_text)}
-
-    except Exception as e:
-        if attempt < max_attempts:
-            print(f"Error {e}, retrying in {retry_delay} seconds... (Attempt {attempt}/{max_attempts})")
-            await asyncio.sleep(retry_delay)
-            return await send_message_to_gemini_async(user_input, attempt + 1, max_attempts, retry_delay * 2)  # Increase delay for next attempt
-        else:
-            return {"text_response": " ", 
-                    "input_tokens": gemini.count_tokens(user_input), 
-                    "output_tokens": gemini.count_tokens(gemini_response_text)}
-
-
 
 async def create_description_of_article(article, rate_limiter=None):
     """
     Calls LLM to create description section, chapter or an article
     """
     # Ждем разрешения от RateLimiter
-    # if rate_limiter is not None: await rate_limiter.wait()
 
     prompt = """Представь, что ты юрист, который должен объяснить 18-летнему клиенту суть статьи из кодекса законов. 
 Твоя задача - изложить основные положения статьи простым и понятным языком, избегая сложной юридической терминологии. 
@@ -93,7 +44,7 @@ async def create_description_of_article(article, rate_limiter=None):
 </article>
 """.format(ARTICLE=article)
     
-    description = await send_message_to_gemini_async(prompt)
+    description = await send_message_to_gemini_async(prompt, rate_limiter=rate_limiter)
     return description
 
 
@@ -101,18 +52,16 @@ async def create_short_description_of_article(article, rate_limiter=None):
     """
     Calls LLM to create short description section, chapter or an article
     """
-    # Ждем разрешения от RateLimiter
-    # if rate_limiter is not None: await rate_limiter.wait()
 
-    prompt = """Представь, что ты юрист, который должен объяснить 18-летнему клиенту суть статьи из кодекса законов. 
-Твоя задача - изложить основные положения статьи простым и понятным языком, избегая сложной юридической терминологии. 
-Постарайся уместить свое объяснение в 2-3 предложения, чтобы молодой человек мог легко понять и запомнить главную информацию.
+    prompt = """Твоя задача - изложить основные положения статьи простым и понятным языком, избегая сложной юридической терминологии. 
+Перечисли списком штрафы за какие типы нарушений обсуждаются в статье, просто перечисли сами нарушения, без детализации.
+Постарайся уместить свое объяснение в несколько предложений. Самую важную и общую информацию приведи в начале.
 <article>
 {ARTICLE}
 </article>
 """.format(ARTICLE=article)
     
-    description = await send_message_to_gemini_async(prompt)
+    description = await send_message_to_gemini_async(prompt, rate_limiter=rate_limiter)
     return description
 
 
@@ -121,7 +70,6 @@ async def create_description_of_chapter(chapter_title, articles, rate_limiter=No
     Calls LLM to create description chapter, chapter or an article
     """
     # Ждем разрешения от RateLimiter
-    # if rate_limiter is not None: await rate_limiter.wait()
     articles_json_str = json.dumps(articles, ensure_ascii=False, indent=2)
 
     prompt = """Ты професиональный юрист который простыми словами объясняет суть главы из КОАП РФ. 
@@ -135,7 +83,7 @@ async def create_description_of_chapter(chapter_title, articles, rate_limiter=No
 </articles>
 """.format(ARTICLES=articles_json_str, chapter_title=chapter_title)
     
-    description = await send_message_to_gemini_async(prompt)
+    description = await send_message_to_gemini_async(prompt, rate_limiter=rate_limiter)
     return description
 
 
@@ -149,15 +97,15 @@ async def process_and_save_article_descriptions(coap_json, base_path, rate_limit
                 article_path = os.path.join(chapter_path, article)
 
                 # create description.txt of articles
-                article_description_path = os.path.join(article_path, 'description.txt')
+                # article_description_path = os.path.join(article_path, 'description.txt')
                 # if os.path.exists(article_description_path): continue
-                task = asyncio.create_task(
-                    create_and_write_article_description(article_text, article_description_path, rate_limiter))
-                tasks.append(task)
+                # task = asyncio.create_task(
+                #     create_and_write_article_description(article_text, article_description_path, rate_limiter))
+                # tasks.append(task)
                 
                 # create short_description.txt of articles
                 short_article_description_path = os.path.join(article_path, 'short_description.txt')
-                if os.path.exists(short_article_description_path): continue
+                # if os.path.exists(short_article_description_path): continue
                 task = asyncio.create_task(
                     create_and_write_short_article_description(article_text, short_article_description_path, rate_limiter))
                 tasks.append(task)
@@ -224,15 +172,16 @@ async def main():
     coap_json = create_nested_json(coap_txt)
     create_folder_structure(base_path, coap_json)
 
-    rate_limiter = RateLimiter(5, 6)  # Лимит 5 запросов в 6 секунд (лимит 60 запросов в минуту)
+    # rate_limiter = RateLimiter(5, 6)  # Лимит 5 запросов в 6 секунд (лимит 60 запросов в минуту)
+    rate_limiter = RateLimiter(9, 10)  # Лимит 9 запросов в 10 секунд (лимит 60 запросов в минуту)
 
     # STEP ARTICLE descriptions
-    # await process_and_save_article_descriptions(coap_json, base_path, rate_limiter)
+    await process_and_save_article_descriptions(coap_json, base_path, rate_limiter)
 
     # STEP CHAPTER descriptions
     # created chapter descriptions from article descriptions
-    nested_json = dir_to_json_with_txt_content(base_path)
-    await process_and_save_chapter_descriptions(nested_json, base_path, rate_limiter, rewrite=True)
+    # nested_json = dir_to_json_with_txt_content(base_path)
+    # await process_and_save_chapter_descriptions(nested_json, base_path, rate_limiter, rewrite=True)
 
 
 if __name__ == "__main__":
