@@ -4,6 +4,54 @@ import json, ast
 from km_utils import get_content_from_articles_response, split_list_by_size
 
 
+async def get_perefrased_query_bm_25(USER_QUERY, rate_limiter=None):
+
+    prompt = f"""Ты знающий Юрист в Российской Федерации который помогает сформулировать вопрос на яыке используемом в КОАП РФ и других законодательных документах, таких как конституция и УК РФ.
+Выводи ответ в формате json.
+1. Ключ "Вариации вопросов". Инструкция: Предложи 4 варианта разнообразных и лаконичных формулировок вопроса, не повторяйся.
+Учти что есть многозначные слова, "повестка" может означать как повестка в суд, так и в военкомат. Для многозначных слов приводи их юридические синонимы.
+Обязательно сделай один уточняющий вопрос про форму наказания и размер штрафа.
+Выведи только вопросы в списке без комментариев.
+2. Ключ "Термины". Инструкция: Выдели специфичные термины из вопросов для того чтобы по ним осуществить поиск с помощью алгоритма BM25. Напиши от 10 до 15 терминов специфичных к темам данного вопроса.
+
+Переводи просторечные выражения в юридический язык, и приведи к ним несколько синонимов которые могут быть использованы. Например взятка это незаконное вознаграждение, а тонировка связана со светопропусканием,
+вырубка леса это заготовка древесины, драка это нанесение побоев, 
+
+
+Пример ответа:
+Вопрос: Что будет за марихуану? 
+Ответ: 
+{{
+  'Вариации вопросов': [
+    'Какое количество каннабиса является административным а какое уголовным преступлением?',
+    'Каковы юридические последствия употребления и хранения каннабиса без цели распространения или сбыта?',
+    'Каковы последствия распространения или сбыта каннабиса или марихуаны?',
+    'Какое количество марихуаны считается небольшим, а какое значительным?',
+  ],
+  'Термины': [
+    'употребление каннабиса или марихуаны',
+    'каннабиноиды',
+    'штраф',
+    'форма наказания',
+    'сбыт каннабиса'
+  ]
+}}
+
+Вот попрос:
+<query>{USER_QUERY}</query>
+Ответ:
+"""
+    generation_params = {
+        "temperature": 1,
+        "top_p": 1,
+        "top_k": 32,
+        # "max_output_tokens": 2048,
+    }
+    description = await send_message_to_gemini_async(prompt, attempt=1, max_attempts=10, generation_params=generation_params, rate_limiter=rate_limiter)
+    return description
+
+
+
 async def select_articles_round_2(USER_QUERY_ORI, USER_QUERY, context_chunks, rate_limiter=None):
     tasks = []
     for context_chunk in context_chunks:
@@ -202,7 +250,7 @@ async def get_chunked_chapter_and_article_navigation(user_query_ori, user_query,
     return choosed_articles
 
 
-async def get_perefrased_query(USER_QUERY, ):
+async def get_perefrased_query(USER_QUERY, rate_limiter=None):
 
     prompt = """Ты знающий Юрист в Российской Федерации который помогает сформулировать вопросы на юридический языке так, чтобы он был понятен и обычным людям и юристам, говорящим на языке законов. Формулировки краткие но понятные.
 Переводи просторечные выражения в юридический язык, например "взятка" в "незаконное вознаграждение".
@@ -225,11 +273,11 @@ async def get_perefrased_query(USER_QUERY, ):
         "top_k": 8,
         # "max_output_tokens": 2048,
     }
-    description = await send_message_to_gemini_async(prompt, attempt=1, max_attempts=10, generation_params=generation_params)
+    description = await send_message_to_gemini_async(prompt, attempt=1, max_attempts=10, generation_params=generation_params, rate_limiter=rate_limiter)
     return description
 
 
-async def get_section_nagigation(user_query_ori, USER_QUERY, ToC_sections):
+async def get_section_nagigation(user_query_ori, USER_QUERY, ToC_sections, rate_limiter=None):
     if isinstance(ToC_sections, dict):
         ToC_sections = json.dumps(ToC_sections, ensure_ascii=False, indent=2)
 
@@ -248,7 +296,7 @@ async def get_section_nagigation(user_query_ori, USER_QUERY, ToC_sections):
 Формат должен выглядеть так:
 ["Раздел II. Особенная часть", "Раздел V. Исполнение постановлений по делам об административных правонарушениях"]
 """.format(user_query_ori=user_query_ori, USER_QUERY=USER_QUERY, ToC_sections=ToC_sections)
-    description = await send_message_to_gemini_async(prompt, attempt=1, max_attempts=10)
+    description = await send_message_to_gemini_async(prompt, attempt=1, max_attempts=10, rate_limiter=rate_limiter)
 
 
     return description

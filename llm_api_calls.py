@@ -35,7 +35,7 @@ def send_message_to_gemini(user_input):
     
 
 
-async def send_message_to_gemini_async(user_input, rate_limiter=None, attempt=1, max_attempts=5, retry_delay = 1, generation_params={}):
+async def send_message_to_gemini_async(user_input, rate_limiter=None, attempt=1, max_attempts=10, retry_delay = 1, generation_params={}):
     if rate_limiter is not None: await rate_limiter.wait()
 
     genai.configure(api_key=GEMINI_API_KEY)
@@ -44,7 +44,7 @@ async def send_message_to_gemini_async(user_input, rate_limiter=None, attempt=1,
     generation_config = {
         "temperature": 0,
         "top_p": 1,
-        "top_k": 4,
+        "top_k": 1,
         # "max_output_tokens": 2048,
     }
 
@@ -77,6 +77,7 @@ async def send_message_to_gemini_async(user_input, rate_limiter=None, attempt=1,
                     "output_tokens": gemini.count_tokens(gemini_response_text)}
         else:
             # raise
+            print(f'{user_input}, finish resason:', response.candidates[0].finish_reason)
             return {"text_response": f'finish reason: {response.candidates[0].finish_reason}', 
                     "input_tokens": gemini.count_tokens(user_input), 
                     "output_tokens": 0}
