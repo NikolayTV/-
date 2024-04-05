@@ -186,7 +186,7 @@ def create_nested_json(text):
         article_match = re.match(article_pattern, line)
         if article_match and current_section is not None and current_chapter is not None:
             article_title = article_match.group(0)  # Изменено для захвата всей строки
-            current_article = article_title[:250] # ограничим название статей до 250 символов - максимальная длина папки в макбуке
+            current_article = article_title[:230] # ограничим название статей до 240 символов - максимальная длина папки в макбуке
             if current_article not in json_data[current_section][current_chapter]:
                 json_data[current_section][current_chapter][current_article] = ""
             continue
